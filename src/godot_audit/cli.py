@@ -218,6 +218,24 @@ SEVERITY_RANK: Final[dict[str, int]] = {
     Severity.ERROR.value: 2,
 }
 
+# Per-category extra-column definition used by the text and Markdown
+# renderers. The table always carries (Sev, Path); the optional third
+# column is category-specific so that each row is self-explanatory
+# without repeating a long sentence.
+#
+# * ``(header, field_name)`` — add a single extra column whose cell
+#   reads ``getattr(issue, field_name) or ""``.
+# * ``None`` — render only (Sev, Path); the category title already
+#   carries the meaning (e.g. backup leftovers).
+_CATEGORY_EXTRA_COLUMN: Final[dict[Category, tuple[str, str] | None]] = {
+    Category.MIRRORING: ("Suggested move", "suggested"),
+    Category.NAMING: ("Suggested", "suggested"),
+    Category.STALE_NAME: ("Suffix", "detail"),
+    Category.NEAR_DUPLICATE: ("Near-identical to", "paired_with"),
+    Category.BACKUP: None,
+    Category.ORPHAN_COMPANION: ("Missing source", "detail"),
+}
+
 
 @dataclass(frozen=True, slots=True, order=True)
 class Issue:
@@ -227,13 +245,27 @@ class Issue:
         severity: Importance level.
         category: Category the issue belongs to.
         path: Project-relative path (forward slashes).
-        message: Human-readable explanation.
+        message: Human-readable explanation, kept for JSON output and
+            for callers that want a ready-made summary line.
+        suggested: Category-specific suggestion (snake_case stem for
+            :data:`Category.NAMING`, destination path for
+            :data:`Category.MIRRORING`). ``None`` when not applicable.
+        paired_with: Other path involved in the finding, used by
+            :data:`Category.NEAR_DUPLICATE` to name the near-identical
+            sibling. ``None`` when not applicable.
+        detail: Short category-specific marker — the stale suffix for
+            :data:`Category.STALE_NAME`, the missing source filename for
+            :data:`Category.ORPHAN_COMPANION`. ``None`` when not
+            applicable.
     """
 
     severity: Severity
     category: Category
     path: str
     message: str
+    suggested: str | None = None
+    paired_with: str | None = None
+    detail: str | None = None
 
 
 @dataclass(slots=True)
@@ -449,6 +481,7 @@ class ProjectAuditor:
                 continue
 
             suggestion: str = matching_subdirs[0]
+            suggested_path: str = f"scripts/{suggestion}/{file_path.name}"
             self._report.add(
                 Issue(
                     severity=Severity.WARNING,
@@ -457,9 +490,10 @@ class ProjectAuditor:
                     message=(
                         f"Script sits at scripts/ root but its scene is in "
                         f"scenes/{suggestion}/. Suggested move: "
-                        f"scripts/{suggestion}/{file_path.name} "
+                        f"{suggested_path} "
                         f"(use Godot's FileSystem drag & drop)."
                     ),
+                    suggested=suggested_path,
                 )
             )
 
@@ -517,6 +551,7 @@ class ProjectAuditor:
             # Prefer the first candidate as the suggested destination
             target_dir: Path = candidate_dirs[0]
             target_rel: str = target_dir.relative_to(self.project_root).as_posix()
+            suggested_path: str = f"{target_rel}/{file_path.name}"
             extra_note: str = ""
             if len(candidate_dirs) > 1:
                 others: list[str] = [
@@ -535,10 +570,11 @@ class ProjectAuditor:
                     path=self._rel(file_path),
                     message=(
                         f"Script is not colocated with its scene. "
-                        f"Suggested move: {target_rel}/{file_path.name}"
+                        f"Suggested move: {suggested_path}"
                         f"{extra_note} "
                         f"(use Godot's FileSystem drag & drop)."
                     ),
+                    suggested=suggested_path,
                 )
             )
 
@@ -561,6 +597,7 @@ class ProjectAuditor:
                 continue
             if SNAKE_CASE_PATTERN.match(stem):
                 continue
+            suggested_name: str = f"{_to_snake_case(stem)}{file_path.suffix}"
             self._report.add(
                 Issue(
                     severity=Severity.INFO,
@@ -568,8 +605,9 @@ class ProjectAuditor:
                     path=self._rel(file_path),
                     message=(
                         f"Filename stem '{stem}' is not snake_case. "
-                        f"Suggested: '{_to_snake_case(stem)}{file_path.suffix}'."
+                        f"Suggested: '{suggested_name}'."
                     ),
+                    suggested=suggested_name,
                 )
             )
 
@@ -596,8 +634,10 @@ class ProjectAuditor:
                                 f"Filename ends with '{suffix}' — looks like a "
                                 f"stale version. Promote it or delete it."
                             ),
+                            detail=suffix,
                         )
                     )
+                    break
                     break
 
     # ── Check 4: near-duplicate detection ──────────────────────
@@ -659,6 +699,12 @@ class ProjectAuditor:
                     ) == _normalize_stem_for_variant_check(similar_stem):
                         continue
 
+                    # Last-line filter: if the stems swap one full word
+                    # at an aligned position (e.g. guitar/synth), they
+                    # are semantically unrelated assets — skip.
+                    if _has_totally_different_word(stems[i], similar_stem):
+                        continue
+
                     rel_a: str = self._rel(file_a)
                     rel_b: str = self._rel(files[match_index])
                     pair: tuple[str, str] = tuple(sorted((rel_a, rel_b)))
@@ -675,6 +721,7 @@ class ProjectAuditor:
                                 f"possible typo or forgotten copy. Confirm "
                                 f"which one to keep."
                             ),
+                            paired_with=pair[1],
                         )
                     )
 
@@ -704,6 +751,7 @@ class ProjectAuditor:
                         f"('{source.name}' not found in the same directory). "
                         f"Safe to delete."
                     ),
+                    detail=source.name,
                 )
             )
 
@@ -773,6 +821,63 @@ def _normalize_stem_for_variant_check(stem: str) -> str:
         Normalized stem suitable for equality comparison.
     """
     return re.sub(r"\d+", "#", stem.lower())
+
+
+# Similarity ratio below which two positionally-aligned alphabetic tokens
+# are considered "totally different words" (not a typo of each other).
+_TOTALLY_DIFFERENT_WORD_RATIO: Final[float] = 0.5
+
+
+def _has_totally_different_word(
+    stem_a: str,
+    stem_b: str,
+    ratio_cutoff: float = _TOTALLY_DIFFERENT_WORD_RATIO,
+) -> bool:
+    """Return True if *stem_a* and *stem_b* differ by a full distinct word.
+
+    Last-line filter for near-duplicate detection: even after
+    :func:`difflib.get_close_matches` flags two stems as similar and
+    :func:`_normalize_stem_for_variant_check` confirms they are not
+    numbered variants, the pair can still be semantically unrelated —
+    e.g. ``fluttering_breeze_..._with_guitar_1min_20`` vs
+    ``fluttering_breeze_..._with_synth_1min_20``. Such pairs share
+    most of their stem but swap one full word at a fixed position.
+
+    Algorithm: both stems are tokenised on non-alphanumeric boundaries
+    and lowercased. If the two token lists have different lengths, the
+    stems are structurally divergent and the caller's existing decision
+    is kept (returns ``False``). Otherwise the tokens are compared
+    position by position. Purely numeric token differences are ignored
+    (already covered by :func:`_normalize_stem_for_variant_check`). For
+    alphabetic (or mixed) token pairs, a :class:`difflib.SequenceMatcher`
+    ratio below *ratio_cutoff* means the tokens are unrelated words, and
+    the stems are reported as truly different.
+
+    Args:
+        stem_a: First filename stem.
+        stem_b: Second filename stem.
+        ratio_cutoff: Similarity threshold; tokens scoring strictly
+            below this are considered totally different words.
+
+    Returns:
+        ``True`` if at least one pair of aligned tokens is a fully
+        distinct word, ``False`` otherwise.
+    """
+    tokens_a: list[str] = re.findall(r"[A-Za-z0-9]+", stem_a.lower())
+    tokens_b: list[str] = re.findall(r"[A-Za-z0-9]+", stem_b.lower())
+    if len(tokens_a) != len(tokens_b):
+        return False
+    for token_a, token_b in zip(tokens_a, tokens_b, strict=True):
+        if token_a == token_b:
+            continue
+        # Pure digit differences are already handled upstream by the
+        # numbered-variant normalizer; ignore them here too.
+        if token_a.isdigit() and token_b.isdigit():
+            continue
+        ratio: float = difflib.SequenceMatcher(None, token_a, token_b).ratio()
+        if ratio < ratio_cutoff:
+            return True
+    return False
 
 
 def _filter_report(
@@ -888,6 +993,12 @@ class AuditRenderer:
     ) -> None:
         """Render the issues of a given category as a table.
 
+        The table layout is driven by :data:`_CATEGORY_EXTRA_COLUMN`:
+        every table has (Sev, Path); a category-specific third column
+        (e.g. ``Suggested`` for naming, ``Near-identical to`` for
+        near-duplicates) replaces the previously-shared ``Message``
+        column so the same long sentence is never repeated row by row.
+
         Args:
             category: Category being rendered.
             issues: Sorted issues to display.
@@ -902,7 +1013,10 @@ class AuditRenderer:
         )
         table.add_column("Sev", style="bold", width=6, no_wrap=True)
         table.add_column("Path", style="cyan", overflow="fold")
-        table.add_column("Message", overflow="fold")
+
+        extra: tuple[str, str] | None = _CATEGORY_EXTRA_COLUMN.get(category)
+        if extra is not None:
+            table.add_column(extra[0], overflow="fold")
 
         for issue in issues:
             sev_style: str = SEVERITY_STYLES[issue.severity]
@@ -910,7 +1024,11 @@ class AuditRenderer:
                 sev_cell = self.out.Text(issue.severity.value, style=sev_style)
             else:
                 sev_cell = issue.severity.value
-            table.add_row(sev_cell, issue.path, issue.message)
+            if extra is None:
+                table.add_row(sev_cell, issue.path)
+            else:
+                value: str = getattr(issue, extra[1]) or ""
+                table.add_row(sev_cell, issue.path, value)
 
         self.out.rich_print(table)
 
@@ -920,25 +1038,39 @@ class AuditRenderer:
     def render_json(report: AuditReport) -> str:
         """Return the report as a JSON document.
 
+        Each issue carries its ``severity``, ``category``, ``path`` and
+        the full ``message``. Category-specific structured fields
+        (``suggested``, ``paired_with``, ``detail``) are emitted only
+        when set, so downstream consumers can key on them without
+        having to parse the human-readable message.
+
         Args:
             report: Filtered report to serialize.
 
         Returns:
             JSON-serialized report.
         """
+        issues_payload: list[dict[str, object]] = []
+        for issue in report.issues:
+            entry: dict[str, object] = {
+                "severity": issue.severity.value,
+                "category": issue.category.value,
+                "path": issue.path,
+                "message": issue.message,
+            }
+            if issue.suggested is not None:
+                entry["suggested"] = issue.suggested
+            if issue.paired_with is not None:
+                entry["paired_with"] = issue.paired_with
+            if issue.detail is not None:
+                entry["detail"] = issue.detail
+            issues_payload.append(entry)
+
         payload: dict[str, object] = {
             "project_root": str(report.project_root),
             "files_scanned": report.files_scanned,
             "counts_by_severity": report.counts_by_severity(),
-            "issues": [
-                {
-                    "severity": issue.severity.value,
-                    "category": issue.category.value,
-                    "path": issue.path,
-                    "message": issue.message,
-                }
-                for issue in report.issues
-            ],
+            "issues": issues_payload,
         }
         return json.dumps(payload, indent=2, ensure_ascii=False)
 
@@ -978,13 +1110,20 @@ class AuditRenderer:
                 f"{CATEGORY_DESCRIPTIONS[category]}"
             )
             lines.append("")
-            lines.append("| Severity | Path | Message |")
-            lines.append("| --- | --- | --- |")
-            for issue in sorted(issues):
-                safe_msg: str = issue.message.replace("|", r"\|")
-                lines.append(
-                    f"| {issue.severity.value} | `{issue.path}` | {safe_msg} |"
-                )
+            extra: tuple[str, str] | None = _CATEGORY_EXTRA_COLUMN.get(category)
+            if extra is None:
+                lines.append("| Severity | Path |")
+                lines.append("| --- | --- |")
+                for issue in sorted(issues):
+                    lines.append(f"| {issue.severity.value} | `{issue.path}` |")
+            else:
+                lines.append(f"| Severity | Path | {extra[0]} |")
+                lines.append("| --- | --- | --- |")
+                for issue in sorted(issues):
+                    value: str = (getattr(issue, extra[1]) or "").replace("|", r"\|")
+                    lines.append(
+                        f"| {issue.severity.value} | `{issue.path}` | {value} |"
+                    )
             lines.append("")
 
         return "\n".join(lines).rstrip() + "\n"

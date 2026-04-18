@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-18
+
+### Added
+
+- Near-duplicate detection now applies a final word-level filter: after
+  the numbered-variant check, if two stems share the same tokenisation
+  structure but swap one fully distinct word at an aligned position
+  (e.g. `fluttering_breeze_..._with_guitar_1min_20` vs
+  `..._with_synth_1min_20`), the pair is treated as semantically
+  unrelated assets and is no longer flagged. Implemented via
+  `_has_totally_different_word` using `difflib.SequenceMatcher.ratio`
+  with a 0.5 cutoff.
+- `Issue` dataclass gains three optional structured fields used by the
+  renderers: `suggested` (naming and mirroring target), `paired_with`
+  (near-duplicate sibling), and `detail` (stale-name suffix, missing
+  companion source). The JSON output emits these fields when set.
+
+### Changed
+
+- Text and Markdown renderers no longer display the wide `Message`
+  column with a repeated long sentence per row. Each category table
+  now shows `Sev | Path` plus a single category-specific column:
+  - `mirroring` → `Suggested move`
+  - `naming` → `Suggested`
+  - `stale_name` → `Suffix`
+  - `near_duplicate` → `Near-identical to`
+  - `orphan_companion` → `Missing source`
+  - `backup` → (no third column)
+- The human-readable `message` is still populated on every `Issue` and
+  preserved in the JSON output, so callers that rely on it keep
+  working.
+
 ## [1.0.1] - 2026-04-18
 
 ### Fixed
@@ -46,7 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--strict`).
   - `2` — invalid project path.
 
-[Unreleased]: https://github.com/olivierpons/godot-audit/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/olivierpons/godot-audit/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/olivierpons/godot-audit/releases/tag/v1.1.0
 [1.0.1]: https://github.com/olivierpons/godot-audit/releases/tag/v1.0.1
 [1.0.0]: https://github.com/olivierpons/godot-audit/releases/tag/v1.0.0
 
