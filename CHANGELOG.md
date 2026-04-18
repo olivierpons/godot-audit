@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renderers: `suggested` (naming and mirroring target), `paired_with`
   (near-duplicate sibling), and `detail` (stale-name suffix, missing
   companion source). The JSON output emits these fields when set.
+- New CLI option `-k` / `--no-dashes`: enforce strict snake_case in
+  the naming check. By default, stems with a single `-` between
+  alphanumeric runs are accepted (e.g. `pixel_operator8-bold`), since
+  this is common in font families and third-party asset packs and
+  Godot imports them without issue. Pass `--no-dashes` to reject
+  dashes and require underscores only. Equivalent kwarg on
+  `ProjectAuditor`: `allow_dashes: bool = True`.
+- New CLI option `-x` / `--suggested-no-ext`: drop the file extension
+  from the naming table's `Suggested` column. Rationale: Godot's
+  FileSystem dock and the native rename widget of common desktop
+  file managers (GNOME Files / Nautilus, macOS Finder, Windows
+  Explorer) select only the stem when renaming with F2 or a
+  double-click on the name. Pasting a full `foo.ttf` suggestion over
+  that selection produces `foo.ttf.ttf`; a bare `foo` can be pasted
+  directly. Off by default. Equivalent kwarg on `AuditRenderer`:
+  `strip_extension_in_suggested: bool = False`.
 
 ### Changed
 

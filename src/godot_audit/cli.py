@@ -99,8 +99,18 @@ BACKUP_NAME_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"~$"),
 )
 
-# Canonical snake_case pattern for stems
+# Canonical snake_case pattern for stems. Strict variant: only lowercase
+# alphanumerics separated by single underscores.
 SNAKE_CASE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
+
+# Extended variant used when ``allow_dashes=True`` (default on
+# ``ProjectAuditor``). Accepts a single ``-`` as an in-word separator,
+# because Godot asset packs and many font families ship stems like
+# ``pixel_operator8-bold`` that are already unambiguous and that
+# Godot's importer handles without issue.
+SNAKE_CASE_WITH_DASH_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[a-z0-9]+(?:[_-][a-z0-9]+)*$"
+)
 
 # Extensions subject to snake_case enforcement
 SNAKE_CASE_ENFORCED_EXTS: Final[frozenset[str]] = (
@@ -333,6 +343,7 @@ class ProjectAuditor:
         layout: Layout = Layout.COLOCATED,
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         extra_ignored_dirs: Iterable[str] = (),
+        allow_dashes: bool = True,
     ) -> None:
         """Initialize the auditor.
 
@@ -348,6 +359,10 @@ class ProjectAuditor:
                 :func:`difflib.get_close_matches` for typo detection.
             extra_ignored_dirs: Additional directory names to skip on top
                 of :data:`DEFAULT_IGNORED_DIRS`.
+            allow_dashes: When ``True`` (default), filename stems may use
+                ``-`` as a separator in addition to ``_``; stems like
+                ``pixel_operator8-bold`` pass the snake_case check. When
+                ``False``, only strict snake_case is accepted.
 
         Raises:
             FileNotFoundError: If *project_root* does not exist.
@@ -363,6 +378,7 @@ class ProjectAuditor:
             )
         self.layout: Layout = layout
         self.similarity_threshold: float = similarity_threshold
+        self.allow_dashes: bool = allow_dashes
         self.ignored_dirs: frozenset[str] = frozenset(
             DEFAULT_IGNORED_DIRS | set(extra_ignored_dirs)
         )
@@ -600,7 +616,12 @@ class ProjectAuditor:
             stem: str = file_path.stem
             if stem.endswith(".bak"):
                 continue
-            if SNAKE_CASE_PATTERN.match(stem):
+            pattern: re.Pattern[str] = (
+                SNAKE_CASE_WITH_DASH_PATTERN
+                if self.allow_dashes
+                else SNAKE_CASE_PATTERN
+            )
+            if pattern.match(stem):
                 continue
             suggested_name: str = f"{_to_snake_case(stem)}{file_path.suffix}"
             self._report.add(
@@ -926,13 +947,53 @@ class AuditRenderer:
     text otherwise (handled internally by :class:`OutputHandler`).
     """
 
-    def __init__(self, out: OutputHandler) -> None:
+    def __init__(
+        self,
+        out: OutputHandler,
+        *,
+        strip_extension_in_suggested: bool = False,
+    ) -> None:
         """Initialize the renderer.
 
         Args:
             out: Output handler configured by the CLI.
+            strip_extension_in_suggested: When ``True``, the NAMING
+                table's ``Suggested`` column shows only the stem, with
+                the file extension removed. This matches the rename
+                workflow in Godot's FileSystem dock and in common
+                desktop file managers (GNOME Files / Nautilus, Finder,
+                Explorer): pressing F2 or double-clicking a filename
+                selects only the stem. A full ``foo.ttf`` suggestion
+                pasted over that selection would produce ``foo.ttf.ttf``;
+                a bare ``foo`` can be pasted directly.
         """
         self.out: OutputHandler = out
+        self.strip_extension_in_suggested: bool = strip_extension_in_suggested
+
+    def _format_extra_value(self, category: Category, raw: str) -> str:
+        """Return the extra-column value adjusted for display options.
+
+        Currently only :data:`Category.NAMING` honours
+        ``strip_extension_in_suggested`` — other categories (mirroring
+        target path, orphan source name, stale suffix, near-duplicate
+        sibling path) are displayed as-is.
+
+        Args:
+            category: Category of the issue whose value is being
+                rendered.
+            raw: Raw value as stored on the issue.
+
+        Returns:
+            Display-ready value.
+        """
+        if not raw:
+            return ""
+        if category is Category.NAMING and self.strip_extension_in_suggested:
+            # Drop the last '.ext'; keep inner dots if any.
+            dot: int = raw.rfind(".")
+            if dot > 0:
+                return raw[:dot]
+        return raw
 
     # ── Text rendering ─────────────────────────────────────────
 
@@ -1032,7 +1093,8 @@ class AuditRenderer:
             if extra is None:
                 table.add_row(sev_cell, issue.path)
             else:
-                value: str = getattr(issue, extra[1]) or ""
+                raw: str = getattr(issue, extra[1]) or ""
+                value: str = self._format_extra_value(category, raw)
                 table.add_row(sev_cell, issue.path, value)
 
         self.out.rich_print(table)
@@ -1079,9 +1141,13 @@ class AuditRenderer:
         }
         return json.dumps(payload, indent=2, ensure_ascii=False)
 
-    @staticmethod
-    def render_markdown(report: AuditReport) -> str:
+    def render_markdown(self, report: AuditReport) -> str:
         """Return the report as a Markdown document.
+
+        The per-category tables honour
+        :attr:`strip_extension_in_suggested` just like the text
+        renderer, so Markdown copies pasted into a PR match what the
+        terminal shows.
 
         Args:
             report: Filtered report to render.
@@ -1125,7 +1191,10 @@ class AuditRenderer:
                 lines.append(f"| Severity | Path | {extra[0]} |")
                 lines.append("| --- | --- | --- |")
                 for issue in sorted(issues):
-                    value: str = (getattr(issue, extra[1]) or "").replace("|", r"\|")
+                    raw: str = getattr(issue, extra[1]) or ""
+                    value: str = self._format_extra_value(category, raw).replace(
+                        "|", r"\|"
+                    )
                     lines.append(
                         f"| {issue.severity.value} | `{issue.path}` | {value} |"
                     )
@@ -1165,6 +1234,16 @@ COMMON OPTIONS
     -q, --quiet                        Hide summary panel (alias for -p none)
     -v, --verbosity {0,1,2,3}          Output verbosity level
 
+NAMING CHECK TUNING
+    -k, --no-dashes          Enforce strict snake_case; reject '-' in stems.
+                             By default '-' is accepted as a separator
+                             (e.g. 'pixel_operator8-bold' passes).
+    -x, --suggested-no-ext   Drop '.ext' from the Suggested column. Godot's
+                             FileSystem rename (F2) and desktop file managers
+                             select the stem only, so a bare 'foo' can be
+                             pasted directly whereas 'foo.ttf' would become
+                             'foo.ttf.ttf'. Off by default.
+
 INFO
     -l, --list-categories    List all check categories and exit
     -L, --list-ignored-dirs  List directories ignored by default and exit
@@ -1195,13 +1274,24 @@ CATEGORIES
   naming            Filename stem is not snake_case. Affects scripts, scenes,
                     resources, sprites, audio, and fonts. Suggests a
                     snake_case alternative. Severity: INFO.
+                    By default stems with a '-' between alphanum runs
+                    (e.g. 'pixel_operator8-bold') are accepted; pass
+                    --no-dashes to enforce strict snake_case. Use
+                    --suggested-no-ext to display suggestions without
+                    the file extension so they can be pasted directly
+                    into Godot's FileSystem rename (F2 selects the stem
+                    only, not the extension).
   stale_name        Filename ends with _old, _bak, _backup, _copy, _tmp,
                     _temp, _new, _todelete, or _deprecated. Promote or delete.
   near_duplicate    Two files in the same directory with very similar stems
                     (similarity >= threshold). Catches typos like skeleton
                     vs skeletton. Pairs that only differ by numeric parts
                     (v1/v2, 01/02, Bird Call 1 / Bird Call 3) are skipped
-                    — they are numbered variants, not duplicates. Tune
+                    — they are numbered variants, not duplicates. A final
+                    word-level filter additionally skips pairs that swap
+                    one fully distinct word at an aligned position
+                    (e.g. ..._with_guitar_... vs ..._with_synth_...),
+                    which are different assets, not typos. Tune
                     with --threshold.
   backup            Editor backups: *.bak, *.bak.*, *.orig, names ending with ~.
   orphan_companion  A *.uid or *.import file whose source (foo.gd, bar.mp3)
@@ -1237,6 +1327,13 @@ EXAMPLES
 
   Add custom ignored directories on top of the defaults:
       godot-audit . --ignore-dir docs --ignore-dir build_cache
+
+  Strict snake_case only (reject 'pixel_operator8-bold', etc.):
+      godot-audit . --no-dashes
+
+  Bare suggestions in the naming table, ready to paste in Godot's F2
+  rename (the extension is already preserved by the rename widget):
+      godot-audit . --suggested-no-ext
 
 EXIT CODES
   0   No issues at or above the current severity filter.
@@ -1349,6 +1446,37 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="Add DIR to the ignored directory list. Repeatable.",
+    )
+
+    # ── Naming check tuning ──
+    parser.add_argument(
+        "-k",
+        "--no-dashes",
+        dest="allow_dashes",
+        action="store_false",
+        default=True,
+        help=(
+            "Treat '-' as invalid in filename stems. By default, stems "
+            "like 'pixel_operator8-bold' pass the snake_case check, "
+            "because dashes are common in font families and asset packs "
+            "and Godot imports them without issue. Pass this flag to "
+            "enforce strict snake_case (underscores only)."
+        ),
+    )
+    parser.add_argument(
+        "-x",
+        "--suggested-no-ext",
+        dest="suggested_no_ext",
+        action="store_true",
+        help=(
+            "Drop the file extension from the 'Suggested' column of the "
+            "naming table. Godot's FileSystem dock and most desktop file "
+            "managers (GNOME Files, Finder, Explorer) select only the "
+            "stem when renaming with F2 or a double-click on the name; "
+            "pasting 'foo.ttf' over that selection produces 'foo.ttf.ttf'. "
+            "With this flag the column shows 'foo' instead, ready to "
+            "paste directly. Off by default."
+        ),
     )
 
     # ── Behaviour ──
@@ -1488,6 +1616,7 @@ def _run_audit(
             layout=layout,
             similarity_threshold=args.threshold,
             extra_ignored_dirs=extra_ignored,
+            allow_dashes=args.allow_dashes,
         )
     except (FileNotFoundError, ValueError) as exc:
         out.error(str(exc))
@@ -1508,6 +1637,7 @@ def _run_audit(
         fmt=args.format,
         output_path=args.output,
         summary_position=_resolve_summary_position(args),
+        strip_extension_in_suggested=args.suggested_no_ext,
     )
 
     return _determine_exit_code(filtered, strict=args.strict)
@@ -1539,6 +1669,7 @@ def _dispatch_render(
     fmt: str,
     output_path: Path | None,
     summary_position: SummaryPosition,
+    strip_extension_in_suggested: bool = False,
 ) -> None:
     """Render *report* according to the requested format and target.
 
@@ -1553,8 +1684,15 @@ def _dispatch_render(
         summary_position: Where to place the summary panel in text mode.
             Ignored for JSON and Markdown formats (which always include
             the summary data in a fixed location).
+        strip_extension_in_suggested: Forwarded to the renderer to
+            control whether the NAMING table's ``Suggested`` column
+            strips the file extension. See
+            :class:`AuditRenderer` for the rationale.
     """
-    renderer: AuditRenderer = AuditRenderer(out)
+    renderer: AuditRenderer = AuditRenderer(
+        out,
+        strip_extension_in_suggested=strip_extension_in_suggested,
+    )
 
     match fmt:
         case "text":

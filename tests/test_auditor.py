@@ -234,6 +234,30 @@ def test_naming_issue_exposes_snake_case_suggestion(godot_project: Path) -> None
     assert naming[0].suggested == "bird_call_1.mp3"
 
 
+def test_allow_dashes_accepts_kebab_snake_stems(godot_project: Path) -> None:
+    """With allow_dashes=True (default), 'pixel_operator8-bold' must pass."""
+    fonts: Path = godot_project / "assets" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "pixel_operator8-bold.ttf").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    naming: list = [i for i in report.issues if i.category is Category.NAMING]
+    assert naming == []
+
+
+def test_allow_dashes_false_flags_kebab_snake_stems(godot_project: Path) -> None:
+    """With allow_dashes=False, 'pixel_operator8-bold' must be flagged."""
+    fonts: Path = godot_project / "assets" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "pixel_operator8-bold.ttf").touch()
+
+    report = ProjectAuditor(godot_project, allow_dashes=False).run()
+    naming: list = [i for i in report.issues if i.category is Category.NAMING]
+    assert len(naming) == 1
+    # strict-mode suggestion replaces the dash with an underscore
+    assert naming[0].suggested == "pixel_operator8_bold.ttf"
+
+
 def test_stale_name_issue_exposes_suffix(godot_project: Path) -> None:
     """STALE_NAME issues must carry the offending suffix in `detail`."""
     (godot_project / "scenes" / "slime_old.tscn").touch()
@@ -285,3 +309,48 @@ def test_mirroring_split_issue_exposes_suggested_path(godot_project: Path) -> No
     mirroring: list = [i for i in report.issues if i.category is Category.MIRRORING]
     assert len(mirroring) == 1
     assert mirroring[0].suggested == "scripts/entities/slime.gd"
+
+
+def test_markdown_strips_extension_in_naming_suggested(godot_project: Path) -> None:
+    """``strip_extension_in_suggested=True`` must drop '.ext' in the naming table."""
+    from cli_toolkit import OutputHandler
+
+    from godot_audit.cli import AuditRenderer
+
+    fonts: Path = godot_project / "assets" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "Bad Font.ttf").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    out = OutputHandler(use_rich=False)
+
+    plain: str = AuditRenderer(out).render_markdown(report)
+    assert "bad_font.ttf" in plain  # default behaviour: extension kept
+
+    stripped: str = AuditRenderer(
+        out, strip_extension_in_suggested=True
+    ).render_markdown(report)
+    # The suggested cell must now read 'bad_font' without the extension.
+    assert "| bad_font |" in stripped
+    assert "bad_font.ttf" not in stripped
+
+
+def test_markdown_strip_extension_does_not_affect_mirroring(
+    godot_project: Path,
+) -> None:
+    """Mirroring target paths must keep their extension even when stripping."""
+    from cli_toolkit import OutputHandler
+
+    from godot_audit.cli import AuditRenderer
+
+    (godot_project / "scenes" / "entities").mkdir()
+    (godot_project / "scenes" / "entities" / "slime.tscn").touch()
+    (godot_project / "scripts" / "slime.gd").touch()
+
+    report = ProjectAuditor(godot_project, layout=Layout.SPLIT).run()
+    out = OutputHandler(use_rich=False)
+
+    rendered: str = AuditRenderer(
+        out, strip_extension_in_suggested=True
+    ).render_markdown(report)
+    assert "scripts/entities/slime.gd" in rendered
