@@ -56,6 +56,9 @@ Repository = "https://github.com/olivierpons/godot-audit"
 Issues = "https://github.com/olivierpons/godot-audit/issues"
 Changelog = "https://github.com/olivierpons/godot-audit/blob/main/CHANGELOG.md"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.version]
 path = "src/godot_audit/__init__.py"
 
