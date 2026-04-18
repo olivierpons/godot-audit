@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-04-18
+
+### Fixed
+
+- CLI help text, usage line, examples, and `argparse` `prog` now display
+  `godot-audit` (the actual command name declared in `project.scripts`)
+  instead of the legacy internal name `audit_godot_project`. Affects the
+  output of `godot-audit --version`, `-h`, and `--help`.
+
 ## [1.0.0] - 2026-04-18
 
 ### Added
@@ -37,5 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--strict`).
   - `2` — invalid project path.
 
-[Unreleased]: https://github.com/olivierpons/godot-audit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/olivierpons/godot-audit/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/olivierpons/godot-audit/releases/tag/v1.0.1
 [1.0.0]: https://github.com/olivierpons/godot-audit/releases/tag/v1.0.0
+

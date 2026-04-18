@@ -1001,10 +1001,10 @@ _DESCRIPTION: Final[str] = (
 )
 
 _SHORT_HELP: Final[str] = """
-audit_godot_project — Verify a Godot project layout against conventions
+godot-audit — Verify a Godot project layout against conventions
 
 USAGE
-    audit_godot_project [PATH] [OPTIONS]
+    godot-audit [PATH] [OPTIONS]
 
 COMMON OPTIONS
     -y, --layout {split,colocated}     Project layout convention
@@ -1065,34 +1065,34 @@ CATEGORIES
 
 EXAMPLES
   Full audit of the current directory, colocated layout (default):
-      audit_godot_project
+      godot-audit
 
   Audit a project that still uses the split layout:
-      audit_godot_project ~/my_game --layout split
+      godot-audit ~/my_game --layout split
 
   Audit a specific project, JSON format written to a file:
-      audit_godot_project ~/my_game --format json --output audit.json
+      godot-audit ~/my_game --format json --output audit.json
 
   Only mirroring and near-duplicate issues:
-      audit_godot_project . -c mirroring -c near_duplicate
+      godot-audit . -c mirroring -c near_duplicate
 
   Skip INFO noise (naming), only keep WARN and above:
-      audit_godot_project . --severity WARN
+      godot-audit . --severity WARN
 
   CI-friendly run: strict mode, no color, no Rich, quiet:
-      audit_godot_project . --strict --no-color --no-rich --quiet
+      godot-audit . --strict --no-color --no-rich --quiet
 
   Markdown report suitable for a PR comment:
-      audit_godot_project . --format markdown > audit.md
+      godot-audit . --format markdown > audit.md
 
   More sensitive near-duplicate detection:
-      audit_godot_project . --threshold 0.80
+      godot-audit . --threshold 0.80
 
   Long report with summary at the bottom (easier to read than scrolling up):
-      audit_godot_project . --summary-position bottom
+      godot-audit . --summary-position bottom
 
   Add custom ignored directories on top of the defaults:
-      audit_godot_project . --ignore-dir docs --ignore-dir build_cache
+      godot-audit . --ignore-dir docs --ignore-dir build_cache
 
 EXIT CODES
   0   No issues at or above the current severity filter.
@@ -1118,7 +1118,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         Fully configured parser.
     """
     parser: argparse.ArgumentParser = build_parser(
-        prog="audit_godot_project",
+        prog="godot-audit",
         description=_DESCRIPTION,
         epilog=_EPILOG,
         short_help=_SHORT_HELP,
