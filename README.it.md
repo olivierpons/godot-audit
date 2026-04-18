@@ -28,6 +28,8 @@ Esegui l'audit della struttura di un progetto Godot rispetto alle tue convenzion
 - **CI-friendly**: codici di uscita non zero, `--no-color`, `--no-rich`, output JSON.
 - **Formati di output multipli**: testo (tabelle Rich), JSON, Markdown.
 - **Suggerimenti consapevoli del layout**: ogni avviso viene con un suggerimento concreto di spostamento.
+- **Controllo naming regolabile**: accetta `-` come separatore per impostazione predefinita (comune negli asset pack e nelle famiglie di font); `--no-dashes` impone lo snake_case rigoroso; `--suggested-no-ext` rimuove l'estensione dalla colonna `Suggested` per allinearsi al flusso di rinomina F2 di Godot.
+- **Filtro near-duplicate consapevole degli antonimi**: dichiara coppie di toggle UI come `checked:unchecked` o `up:down` con `--accept-pair` per silenziare falsi positivi che il rapporto di similarità da solo non può distinguere da un refuso.
 
 ## Installazione
 
@@ -38,7 +40,7 @@ Installa direttamente da GitHub:
 pip install git+https://github.com/olivierpons/godot-audit.git
 
 # Fissa a una release specifica
-pip install git+https://github.com/olivierpons/godot-audit.git@v1.0.0
+pip install git+https://github.com/olivierpons/godot-audit.git@v1.2.0
 ```
 
 Questo importa automaticamente `cli-toolkit[rich]` dal suo repository GitHub.
@@ -68,6 +70,15 @@ godot-audit . --format json --output audit.json
 
 # Rapporto Markdown per un commento PR GitHub
 godot-audit . --format markdown > audit.md
+
+# Silenziare un falso positivo near-duplicate su un toggle UI
+godot-audit . --accept-pair checked:unchecked
+
+# Più coppie accettate in un singolo argomento
+godot-audit . --accept-pair "(checked:unchecked)(up:down)(open:closed)"
+
+# snake_case rigoroso (rifiuta i trattini) ed estensioni rimosse in 'Suggested'
+godot-audit . --no-dashes --suggested-no-ext
 ```
 
 ## Opzioni
@@ -84,6 +95,9 @@ Ogni opzione ha una forma breve e una lunga. `-h` stampa un memo compatto; `--he
 | `-s` | `--severity` | Severità minima: `INFO`, `WARN`, `ERROR` (default: `INFO`) |
 | `-t` | `--threshold` | Soglia di similarità per il rilevamento di quasi-duplicati (default: `0.88`) |
 | `-i` | `--ignore-dir` | Aggiungi una directory alla lista ignore (ripetibile) |
+| `-k` | `--no-dashes` | Rifiutare `-` come separatore negli stem (predefinito: accettato) |
+| `-x` | `--suggested-no-ext` | Rimuovere l'estensione del file dalla colonna `Suggested` del check naming |
+| `-A` | `--accept-pair` | Dichiarare che due parole sono semanticamente distinte (`checked:unchecked`); ripetibile; accetta `/` o `()` per impacchettare più coppie |
 | `-p` | `--summary-position` | `top`, `bottom` o `none` (default: `top`) |
 | `-S` | `--strict` | Uscita non zero anche su problemi INFO |
 | `-q` | `--quiet` | Nascondi il pannello riepilogo (alias per `-p none`) |

@@ -118,3 +118,10 @@ addopts = [
     "--cov-report=term-missing",
 ]
 testpaths = ["tests"]
+
+[tool.coverage.report]
+exclude_also = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

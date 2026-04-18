@@ -258,6 +258,34 @@ def test_allow_dashes_false_flags_kebab_snake_stems(godot_project: Path) -> None
     assert naming[0].suggested == "pixel_operator8_bold.ttf"
 
 
+def test_allow_dashes_true_keeps_mixed_run_dash_in_suggested(
+    godot_project: Path,
+) -> None:
+    """With allow_dashes=True, a mixed ``_-_`` run becomes ``-`` in the suggestion."""
+    music: Path = godot_project / "assets" / "music"
+    music.mkdir(parents=True)
+    (music / "Theme_-_Air_Pirates_Return01.mp3").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    naming: list = [i for i in report.issues if i.category is Category.NAMING]
+    assert len(naming) == 1
+    assert naming[0].suggested == "theme-air_pirates_return01.mp3"
+
+
+def test_allow_dashes_false_uses_underscores_for_mixed_run_suggested(
+    godot_project: Path,
+) -> None:
+    """With allow_dashes=False, the same mixed run becomes all underscores."""
+    music: Path = godot_project / "assets" / "music"
+    music.mkdir(parents=True)
+    (music / "Theme_-_Air_Pirates_Return01.mp3").touch()
+
+    report = ProjectAuditor(godot_project, allow_dashes=False).run()
+    naming: list = [i for i in report.issues if i.category is Category.NAMING]
+    assert len(naming) == 1
+    assert naming[0].suggested == "theme_air_pirates_return01.mp3"
+
+
 def test_stale_name_issue_exposes_suffix(godot_project: Path) -> None:
     """STALE_NAME issues must carry the offending suffix in `detail`."""
     (godot_project / "scenes" / "slime_old.tscn").touch()
@@ -297,6 +325,69 @@ def test_near_duplicate_issue_exposes_paired_path(godot_project: Path) -> None:
         "scenes/entities/skeleton.tscn",
         "scenes/entities/skeletton.tscn",
     }
+
+
+def test_checkbox_checked_unchecked_flagged_without_accept_pair(
+    godot_project: Path,
+) -> None:
+    """Baseline: without the opt-in flag, 'checked'/'unchecked' stay flagged."""
+    theme: Path = godot_project / "assets" / "theme"
+    theme.mkdir(parents=True)
+    (theme / "checkbox_checked.png").touch()
+    (theme / "checkbox_unchecked.png").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    dupes: list = [i for i in report.issues if i.category is Category.NEAR_DUPLICATE]
+    assert len(dupes) == 1
+
+
+def test_accepted_pair_silences_checked_unchecked_near_duplicate(
+    godot_project: Path,
+) -> None:
+    """``accepted_pairs`` silences the flagged pair on the aligned distinction."""
+    theme: Path = godot_project / "assets" / "theme"
+    theme.mkdir(parents=True)
+    (theme / "checkbox_checked.png").touch()
+    (theme / "checkbox_unchecked.png").touch()
+
+    report = ProjectAuditor(
+        godot_project,
+        accepted_pairs=[("checked", "unchecked")],
+    ).run()
+    dupes: list = [i for i in report.issues if i.category is Category.NEAR_DUPLICATE]
+    assert dupes == []
+
+
+def test_accepted_pair_does_not_silence_unrelated_typos(
+    godot_project: Path,
+) -> None:
+    """A declared pair must not mask typos that do not align on it."""
+    scenes: Path = godot_project / "scenes" / "entities"
+    scenes.mkdir(parents=True)
+    (scenes / "skeleton.tscn").touch()
+    (scenes / "skeletton.tscn").touch()
+
+    report = ProjectAuditor(
+        godot_project,
+        accepted_pairs=[("checked", "unchecked")],
+    ).run()
+    dupes: list = [i for i in report.issues if i.category is Category.NEAR_DUPLICATE]
+    assert len(dupes) == 1
+
+
+def test_accepted_pair_is_case_insensitive_at_init(godot_project: Path) -> None:
+    """Pairs declared with mixed case still match lowercase stems."""
+    theme: Path = godot_project / "assets" / "theme"
+    theme.mkdir(parents=True)
+    (theme / "checkbox_checked.png").touch()
+    (theme / "checkbox_unchecked.png").touch()
+
+    report = ProjectAuditor(
+        godot_project,
+        accepted_pairs=[("Checked", "UnChecked")],
+    ).run()
+    dupes: list = [i for i in report.issues if i.category is Category.NEAR_DUPLICATE]
+    assert dupes == []
 
 
 def test_mirroring_split_issue_exposes_suggested_path(godot_project: Path) -> None:
@@ -354,3 +445,94 @@ def test_markdown_strip_extension_does_not_affect_mirroring(
         out, strip_extension_in_suggested=True
     ).render_markdown(report)
     assert "scripts/entities/slime.gd" in rendered
+
+
+def test_split_layout_skips_scene_at_scenes_root(godot_project: Path) -> None:
+    """Split layout: a scene directly under ``scenes/`` is not a subdir match."""
+    (godot_project / "scenes" / "menu.tscn").touch()
+    (godot_project / "scripts" / "menu.gd").touch()
+
+    report = ProjectAuditor(godot_project, layout=Layout.SPLIT).run()
+    mirroring: list = [i for i in report.issues if i.category is Category.MIRRORING]
+    assert mirroring == []
+
+
+def test_split_layout_skips_script_in_subdir(godot_project: Path) -> None:
+    """Split layout: a script already placed in ``scripts/<subdir>/`` is fine."""
+    (godot_project / "scenes" / "entities").mkdir()
+    (godot_project / "scenes" / "entities" / "slime.tscn").touch()
+    (godot_project / "scripts" / "entities").mkdir()
+    (godot_project / "scripts" / "entities" / "slime.gd").touch()
+
+    report = ProjectAuditor(godot_project, layout=Layout.SPLIT).run()
+    mirroring: list = [i for i in report.issues if i.category is Category.MIRRORING]
+    assert mirroring == []
+
+
+def test_split_layout_skips_script_without_matching_scene(
+    godot_project: Path,
+) -> None:
+    """Split layout: a script at ``scripts/`` root with no scene is not flagged."""
+    (godot_project / "scripts" / "util.gd").touch()
+    (godot_project / "scenes" / "entities").mkdir()
+    (godot_project / "scenes" / "entities" / "slime.tscn").touch()
+
+    report = ProjectAuditor(godot_project, layout=Layout.SPLIT).run()
+    mirroring: list = [i for i in report.issues if i.category is Category.MIRRORING]
+    # Only the script whose scene exists elsewhere gets flagged, not 'util'.
+    paths: set[str] = {i.path for i in mirroring}
+    assert "scripts/util.gd" not in paths
+
+
+def test_colocated_layout_skips_standalone_script(godot_project: Path) -> None:
+    """Colocated layout: a script with no matching scene anywhere is left alone."""
+    (godot_project / "features").mkdir()
+    (godot_project / "features" / "helpers.gd").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    mirroring: list = [i for i in report.issues if i.category is Category.MIRRORING]
+    assert mirroring == []
+
+
+def test_colocated_layout_mentions_alternative_candidates(
+    godot_project: Path,
+) -> None:
+    """Colocated layout: multi-match scripts carry an 'other candidates' hint."""
+    (godot_project / "features" / "enemies").mkdir(parents=True)
+    (godot_project / "features" / "enemies" / "slime.tscn").touch()
+    (godot_project / "features" / "bosses").mkdir(parents=True)
+    (godot_project / "features" / "bosses" / "slime.tscn").touch()
+    # Script in neither of the above directories -> ambiguous colocation.
+    (godot_project / "scripts").mkdir(exist_ok=True)
+    (godot_project / "scripts" / "slime.gd").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    mirroring: list = [i for i in report.issues if i.category is Category.MIRRORING]
+    assert len(mirroring) == 1
+    assert "other candidates" in mirroring[0].message
+
+
+def test_near_duplicate_skipped_when_directory_has_single_file(
+    godot_project: Path,
+) -> None:
+    """A directory holding a single (weird) filename yields no near-duplicate."""
+    sounds: Path = godot_project / "assets" / "sounds"
+    sounds.mkdir(parents=True)
+    (sounds / "unique_bell.mp3").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    dupes: list = [i for i in report.issues if i.category is Category.NEAR_DUPLICATE]
+    assert dupes == []
+
+
+def test_companion_with_existing_source_is_not_flagged(godot_project: Path) -> None:
+    """A ``.uid`` whose source file exists is a valid companion, not an orphan."""
+    scripts: Path = godot_project / "scripts"
+    (scripts / "clock.gd").touch()
+    (scripts / "clock.gd.uid").touch()
+
+    report = ProjectAuditor(godot_project).run()
+    orphans: list = [
+        i for i in report.issues if i.category is Category.ORPHAN_COMPANION
+    ]
+    assert orphans == []

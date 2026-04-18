@@ -28,6 +28,8 @@ Audit a Godot project layout against your conventions. Read-only: never modifies
 - **CI-friendly**: non-zero exit codes, `--no-color`, `--no-rich`, JSON output.
 - **Multiple output formats**: text (Rich tables), JSON, Markdown.
 - **Layout-aware suggestions**: each warning comes with a concrete move suggestion.
+- **Tunable naming check**: accept `-` as a separator by default (common in asset packs and font families), with `--no-dashes` for strict snake_case; strip the extension from the `Suggested` column with `--suggested-no-ext` to match Godot's F2 rename flow.
+- **Antonym-aware near-duplicate filter**: declare UI toggle pairs like `checked:unchecked` or `up:down` with `--accept-pair` to silence false positives that the similarity ratio alone cannot distinguish from a typo.
 
 ## Installation
 
@@ -38,7 +40,7 @@ Install directly from GitHub:
 pip install git+https://github.com/olivierpons/godot-audit.git
 
 # Pin to a specific release
-pip install git+https://github.com/olivierpons/godot-audit.git@v1.0.0
+pip install git+https://github.com/olivierpons/godot-audit.git@v1.2.0
 ```
 
 This automatically pulls in `cli-toolkit[rich]` from its GitHub repository.
@@ -68,6 +70,15 @@ godot-audit . --format json --output audit.json
 
 # Markdown report for a GitHub PR comment
 godot-audit . --format markdown > audit.md
+
+# Silence a UI-toggle near-duplicate false positive
+godot-audit . --accept-pair checked:unchecked
+
+# Multiple accepted pairs in a single argument
+godot-audit . --accept-pair "(checked:unchecked)(up:down)(open:closed)"
+
+# Strict snake_case (reject dashes) and strip extensions in 'Suggested'
+godot-audit . --no-dashes --suggested-no-ext
 ```
 
 ## Options
@@ -84,6 +95,9 @@ Every option has a short and a long form. `-h` prints a compact memo; `--help` p
 | `-s` | `--severity` | Minimum severity: `INFO`, `WARN`, `ERROR` (default: `INFO`) |
 | `-t` | `--threshold` | Similarity threshold for near-duplicate detection (default: `0.88`) |
 | `-i` | `--ignore-dir` | Add directory to ignore list (repeatable) |
+| `-k` | `--no-dashes` | Reject `-` as a separator in stems (default: accepted) |
+| `-x` | `--suggested-no-ext` | Strip the file extension from the naming `Suggested` column |
+| `-A` | `--accept-pair` | Declare that two words are semantically distinct (`checked:unchecked`); repeatable; accepts `/` or `()` to pack multiple pairs |
 | `-p` | `--summary-position` | `top`, `bottom`, or `none` (default: `top`) |
 | `-S` | `--strict` | Non-zero exit even on INFO issues |
 | `-q` | `--quiet` | Hide summary panel (alias for `-p none`) |

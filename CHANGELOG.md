@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-18
+
+### Added
+
+- New CLI option `-A` / `--accept-pair SPEC`: declare that two words
+  are semantically distinct so that filenames aligned on them are
+  not flagged as near-duplicates. Typical use is UI toggle sprite
+  pairs such as `checkbox_checked.png` vs `checkbox_unchecked.png`,
+  whose edit distance is small but whose meaning is opposite — the
+  existing similarity-ratio filter cannot tell them apart from a
+  genuine typo (`skeleton` / `skeletton`). `SPEC` accepts four
+  equivalent syntaxes so pairs can be passed one per flag or packed
+  into a single string: `checked:unchecked` (single pair),
+  `checked:unchecked/up:down` (slash-separated list),
+  `(checked:unchecked)(up:down)` (paren-delimited), or
+  `(checked:unchecked)/(up:down)` (parens + slash). The flag is
+  repeatable and every invocation appends to the accumulated list.
+  Comparison against filename tokens is case-insensitive and
+  order-insensitive. Equivalent kwarg on `ProjectAuditor`:
+  `accepted_pairs: Iterable[tuple[str, str]] = ()`. Opt-in: with no
+  flag, behaviour is identical to v1.1.0.
+
+### Changed
+
+- The snake_case suggestion generator (`_to_snake_case`) now honours
+  the `allow_dashes` setting, not just the acceptance pattern. When
+  `allow_dashes=True` (the default, equivalent to not passing
+  `-k` / `--no-dashes`), any run of separator characters in the
+  source stem is classified before being collapsed: a run made only
+  of underscores stays `_`, a run made only of dashes stays `-`,
+  and a mixed run (both `_` and `-`, e.g. `_-_`, `__-__`, `-_-_-`)
+  collapses to a single `-`. Spaces, dots, and other punctuation are
+  normalised to `_` before this classification, so whitespace around
+  a dash (`foo - bar`) is also treated as a mixed run. With
+  `--no-dashes`, every separator run still collapses to `_` as
+  before. This is a **behaviour change**: suggestions for files
+  containing `_-_` or similar mixed runs will differ from v1.1.0.
+  For example, `Theme_-_Air_Pirates_Return01.mp3` now suggests
+  `theme-air_pirates_return01.mp3` in the default mode, where
+  v1.1.0 suggested `theme_air_pirates_return01.mp3`. No public API
+  signature changed: `ProjectAuditor(allow_dashes=...)` keeps the
+  same surface; only the shape of the `Suggested` column is
+  different. Callers that use `-k` / `--no-dashes` are unaffected.
+
 ## [1.1.0] - 2026-04-18
 
 ### Added
@@ -98,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--strict`).
   - `2` — invalid project path.
 
-[Unreleased]: https://github.com/olivierpons/godot-audit/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/olivierpons/godot-audit/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/olivierpons/godot-audit/releases/tag/v1.2.0
 [1.1.0]: https://github.com/olivierpons/godot-audit/releases/tag/v1.1.0
 [1.0.1]: https://github.com/olivierpons/godot-audit/releases/tag/v1.0.1
 [1.0.0]: https://github.com/olivierpons/godot-audit/releases/tag/v1.0.0

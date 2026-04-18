@@ -28,6 +28,8 @@ Prüfen Sie die Struktur eines Godot-Projekts gegen Ihre Konventionen. Nur-Lesen
 - **CI-freundlich**: Exit-Codes ungleich null, `--no-color`, `--no-rich`, JSON-Ausgabe.
 - **Mehrere Ausgabeformate**: Text (Rich-Tabellen), JSON, Markdown.
 - **Layout-bewusste Vorschläge**: Jede Warnung kommt mit einem konkreten Vorschlag zum Verschieben.
+- **Anpassbare Namensprüfung**: Akzeptiert standardmäßig `-` als Trenner (häufig in Asset-Packs und Schriftfamilien); `--no-dashes` erzwingt striktes snake_case; `--suggested-no-ext` entfernt die Dateiendung aus der `Suggested`-Spalte, passend zum F2-Umbenennen in Godot.
+- **Antonym-bewusster Near-Duplicate-Filter**: UI-Toggle-Paare wie `checked:unchecked` oder `up:down` via `--accept-pair` deklarieren, um False Positives zu unterdrücken, die der Ähnlichkeitswert allein nicht von einem Tippfehler unterscheiden kann.
 
 ## Installation
 
@@ -38,7 +40,7 @@ Direkt von GitHub installieren:
 pip install git+https://github.com/olivierpons/godot-audit.git
 
 # Auf ein bestimmtes Release festlegen
-pip install git+https://github.com/olivierpons/godot-audit.git@v1.0.0
+pip install git+https://github.com/olivierpons/godot-audit.git@v1.2.0
 ```
 
 Dies zieht `cli-toolkit[rich]` automatisch aus seinem GitHub-Repository.
@@ -68,6 +70,15 @@ godot-audit . --format json --output audit.json
 
 # Markdown-Bericht für einen GitHub-PR-Kommentar
 godot-audit . --format markdown > audit.md
+
+# Ein Near-Duplicate-Falschpositiv eines UI-Toggles stummschalten
+godot-audit . --accept-pair checked:unchecked
+
+# Mehrere akzeptierte Paare in einem einzigen Argument
+godot-audit . --accept-pair "(checked:unchecked)(up:down)(open:closed)"
+
+# Striktes snake_case (Bindestriche ablehnen) und Endungen aus 'Suggested' entfernen
+godot-audit . --no-dashes --suggested-no-ext
 ```
 
 ## Optionen
@@ -84,6 +95,9 @@ Jede Option hat eine Kurz- und eine Langform. `-h` druckt ein kompaktes Memo; `-
 | `-s` | `--severity` | Mindestschweregrad: `INFO`, `WARN`, `ERROR` (Standard: `INFO`) |
 | `-t` | `--threshold` | Ähnlichkeitsschwelle für Near-Duplicate-Erkennung (Standard: `0.88`) |
 | `-i` | `--ignore-dir` | Verzeichnis zur Ignore-Liste hinzufügen (wiederholbar) |
+| `-k` | `--no-dashes` | `-` als Trenner in Stems ablehnen (Standard: akzeptiert) |
+| `-x` | `--suggested-no-ext` | Dateiendung aus der `Suggested`-Spalte der Naming-Prüfung entfernen |
+| `-A` | `--accept-pair` | Zwei Wörter als semantisch verschieden deklarieren (`checked:unchecked`); wiederholbar; akzeptiert `/` oder `()` zum Bündeln mehrerer Paare |
 | `-p` | `--summary-position` | `top`, `bottom` oder `none` (Standard: `top`) |
 | `-S` | `--strict` | Exit ungleich null auch bei INFO-Problemen |
 | `-q` | `--quiet` | Zusammenfassung ausblenden (Alias für `-p none`) |

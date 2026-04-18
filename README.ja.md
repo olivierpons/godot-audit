@@ -28,6 +28,8 @@
 - **CI フレンドリー**: 非ゼロ終了コード、`--no-color`、`--no-rich`、JSON 出力。
 - **複数の出力形式**: テキスト(Rich テーブル)、JSON、Markdown。
 - **レイアウト対応の提案**: 各警告には具体的な移動提案が付属します。
+- **調整可能な命名チェック**: デフォルトで `-` を区切り文字として受け入れ（アセットパックやフォントファミリーでよく使われる）、`--no-dashes` で厳密な snake_case を強制。`--suggested-no-ext` は `Suggested` 列から拡張子を取り除き、Godot の F2 リネームフローに合わせる。
+- **反意語を認識する近似重複フィルター**: `--accept-pair` で `checked:unchecked` や `up:down` のような UI トグルペアを宣言し、類似度比だけではタイポと区別できない誤検出を抑制する。
 
 ## インストール
 
@@ -38,7 +40,7 @@ GitHub から直接インストール:
 pip install git+https://github.com/olivierpons/godot-audit.git
 
 # 特定のリリースに固定
-pip install git+https://github.com/olivierpons/godot-audit.git@v1.0.0
+pip install git+https://github.com/olivierpons/godot-audit.git@v1.2.0
 ```
 
 これにより `cli-toolkit[rich]` が GitHub リポジトリから自動的に取得されます。
@@ -68,6 +70,15 @@ godot-audit . --format json --output audit.json
 
 # GitHub PR コメント用の Markdown レポート
 godot-audit . --format markdown > audit.md
+
+# UI トグルの近似重複の誤検出を抑制
+godot-audit . --accept-pair checked:unchecked
+
+# 単一の引数で複数の許可ペアを指定
+godot-audit . --accept-pair "(checked:unchecked)(up:down)(open:closed)"
+
+# 厳密な snake_case（ハイフンを拒否）と 'Suggested' での拡張子除去
+godot-audit . --no-dashes --suggested-no-ext
 ```
 
 ## オプション
@@ -84,6 +95,9 @@ godot-audit . --format markdown > audit.md
 | `-s` | `--severity` | 最低重要度:`INFO`、`WARN`、`ERROR`(デフォルト:`INFO`) |
 | `-t` | `--threshold` | 近似重複検出の類似度閾値(デフォルト:`0.88`) |
 | `-i` | `--ignore-dir` | 無視リストにディレクトリを追加(繰り返し可) |
+| `-k` | `--no-dashes` | ステムで `-` を区切り文字として拒否（デフォルト：受け入れる） |
+| `-x` | `--suggested-no-ext` | naming チェックの `Suggested` 列からファイル拡張子を削除 |
+| `-A` | `--accept-pair` | 2 つの単語が意味的に異なると宣言（`checked:unchecked`）；繰り返し可能；`/` または `()` で複数ペアをパック可 |
 | `-p` | `--summary-position` | `top`、`bottom`、または `none`(デフォルト:`top`) |
 | `-S` | `--strict` | INFO 問題でも非ゼロ終了 |
 | `-q` | `--quiet` | サマリーパネルを非表示(`-p none` のエイリアス) |

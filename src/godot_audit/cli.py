@@ -37,6 +37,8 @@ from godot_audit import __version__
 type IssueList = list["Issue"]
 type GroupedIssues = dict[str, IssueList]
 type SeverityCounts = dict[str, int]
+type AcceptedWordPair = tuple[str, str]
+type AcceptedWordPairs = tuple[AcceptedWordPair, ...]
 
 
 # ===================================================================
@@ -344,6 +346,7 @@ class ProjectAuditor:
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         extra_ignored_dirs: Iterable[str] = (),
         allow_dashes: bool = True,
+        accepted_pairs: Iterable[AcceptedWordPair] = (),
     ) -> None:
         """Initialize the auditor.
 
@@ -363,6 +366,15 @@ class ProjectAuditor:
                 ``-`` as a separator in addition to ``_``; stems like
                 ``pixel_operator8-bold`` pass the snake_case check. When
                 ``False``, only strict snake_case is accepted.
+            accepted_pairs: Iterable of ``(word_a, word_b)`` tuples
+                declared as semantically distinct by the caller. When
+                the near-duplicate check aligns two stems token by
+                token, any aligned pair present in *accepted_pairs*
+                (in either order, case-insensitive) short-circuits the
+                similarity-ratio test and the stems are treated as
+                unrelated assets. Typical use: UI toggle pairs such as
+                ``("checked", "unchecked")`` whose edit distance is
+                small but whose meaning is opposite.
 
         Raises:
             FileNotFoundError: If *project_root* does not exist.
@@ -379,6 +391,9 @@ class ProjectAuditor:
         self.layout: Layout = layout
         self.similarity_threshold: float = similarity_threshold
         self.allow_dashes: bool = allow_dashes
+        self.accepted_pairs: AcceptedWordPairs = _normalize_accepted_pairs(
+            accepted_pairs
+        )
         self.ignored_dirs: frozenset[str] = frozenset(
             DEFAULT_IGNORED_DIRS | set(extra_ignored_dirs)
         )
@@ -430,7 +445,7 @@ class ProjectAuditor:
         """
         try:
             relative: Path = path.relative_to(self.project_root)
-        except ValueError:
+        except ValueError:  # pragma: no cover - scanner only yields in-project paths
             return True
         return any(part in self.ignored_dirs for part in relative.parts)
 
@@ -480,7 +495,7 @@ class ProjectAuditor:
                 continue
             try:
                 rel_to_scenes: Path = file_path.relative_to(scenes_root)
-            except ValueError:
+            except ValueError:  # pragma: no cover - file_path comes from the scan
                 continue
             parent: str = rel_to_scenes.parent.as_posix()
             if parent in {".", ""}:
@@ -492,7 +507,7 @@ class ProjectAuditor:
                 continue
             try:
                 rel_to_scripts: Path = file_path.relative_to(scripts_root)
-            except ValueError:
+            except ValueError:  # pragma: no cover - file_path comes from the scan
                 continue
             if rel_to_scripts.parent.as_posix() not in {".", ""}:
                 continue
@@ -556,7 +571,7 @@ class ProjectAuditor:
             # Skip scripts under script-only top-level directories.
             try:
                 relative: Path = file_path.relative_to(self.project_root)
-            except ValueError:
+            except ValueError:  # pragma: no cover - file_path comes from the scan
                 continue
             if relative.parts and relative.parts[0] in script_only_top_dirs:
                 continue
@@ -623,7 +638,10 @@ class ProjectAuditor:
             )
             if pattern.match(stem):
                 continue
-            suggested_name: str = f"{_to_snake_case(stem)}{file_path.suffix}"
+            suggested_name: str = (
+                f"{_to_snake_case(stem, allow_dashes=self.allow_dashes)}"
+                f"{file_path.suffix}"
+            )
             self._report.add(
                 Issue(
                     severity=Severity.INFO,
@@ -698,7 +716,7 @@ class ProjectAuditor:
                 others: list[tuple[int, str]] = [
                     (j, s) for j, s in enumerate(stems) if j != i
                 ]
-                if not others:
+                if not others:  # pragma: no cover - len(files)>=2 at line 712
                     continue
                 close: list[str] = difflib.get_close_matches(
                     stems[i],
@@ -715,7 +733,7 @@ class ProjectAuditor:
                         (j for j, s in others if s == similar_stem),
                         None,
                     )
-                    if match_index is None:
+                    if match_index is None:  # pragma: no cover - close ⊆ others
                         continue
 
                     # Skip numbered-variant pairs: filenames that only
@@ -728,7 +746,11 @@ class ProjectAuditor:
                     # Last-line filter: if the stems swap one full word
                     # at an aligned position (e.g. guitar/synth), they
                     # are semantically unrelated assets — skip.
-                    if _has_totally_different_word(stems[i], similar_stem):
+                    if _has_totally_different_word(
+                        stems[i],
+                        similar_stem,
+                        accepted_pairs=self.accepted_pairs,
+                    ):
                         continue
 
                     rel_a: str = self._rel(file_a)
@@ -807,24 +829,49 @@ class ProjectAuditor:
 # ===================================================================
 
 
-def _to_snake_case(stem: str) -> str:
+def _to_snake_case(stem: str, *, allow_dashes: bool = False) -> str:
     """Return a snake_case suggestion for an arbitrary filename stem.
 
     Heuristic transformation: camelCase boundaries get an underscore,
-    everything is lowercased, any run of non-alphanumerics becomes a
-    single underscore, and leading/trailing underscores are stripped.
+    everything is lowercased, any character outside ``[a-z0-9_-]`` is
+    converted to ``_``, and each remaining run of ``[_-]`` is collapsed
+    to a single separator following these rules:
+
+    * A run containing only underscores collapses to ``_``.
+    * A run containing only dashes collapses to ``-`` when
+      *allow_dashes* is ``True``, otherwise to ``_``.
+    * A mixed run (both ``_`` and ``-``) collapses to ``-`` when
+      *allow_dashes* is ``True``, otherwise to ``_``.
+
+    Leading and trailing separators are then stripped. If nothing
+    remains, the placeholder ``"unnamed"`` is returned.
 
     Args:
         stem: Original filename stem.
+        allow_dashes: When ``True``, preserve ``-`` as a valid
+            in-word separator in the suggestion. Mirrors the
+            :attr:`ProjectAuditor.allow_dashes` setting; the
+            default is ``False`` so that direct callers of this
+            helper get strict snake_case output.
 
     Returns:
         snake_case suggestion. May still need manual review.
     """
     with_camel_split: str = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", stem)
     lowered: str = with_camel_split.lower()
-    normalized: str = re.sub(r"[^a-z0-9]+", "_", lowered)
-    collapsed: str = re.sub(r"_+", "_", normalized).strip("_")
-    return collapsed or "unnamed"
+    normalized: str = re.sub(r"[^a-z0-9_-]+", "_", lowered)
+
+    def _collapse(match: re.Match[str]) -> str:
+        run: str = match.group(0)
+        if not allow_dashes:
+            return "_"
+        if "-" in run:
+            return "-"
+        return "_"
+
+    collapsed: str = re.sub(r"[_-]+", _collapse, normalized)
+    stripped: str = collapsed.strip("_-")
+    return stripped or "unnamed"
 
 
 def _normalize_stem_for_variant_check(stem: str) -> str:
@@ -854,10 +901,92 @@ def _normalize_stem_for_variant_check(stem: str) -> str:
 _TOTALLY_DIFFERENT_WORD_RATIO: Final[float] = 0.5
 
 
+def _parse_accept_pair_spec(raw: str) -> AcceptedWordPairs:
+    """Parse one ``--accept-pair`` argument into a tuple of word pairs.
+
+    Accepts four equivalent syntaxes so that pairs can be passed one
+    per flag or packed into a single string:
+
+    * single pair: ``"checked:unchecked"``
+    * slash-separated list: ``"checked:unchecked/up:down"``
+    * paren-delimited list: ``"(checked:unchecked)(up:down)"``
+    * parens with slash: ``"(checked:unchecked)/(up:down)"``
+
+    Normalisation: ``)(`` is first rewritten as ``/``, then every ``(``
+    and ``)`` is stripped, then the remaining string is split on ``/``.
+    Each chunk must contain exactly one ``:`` between two non-empty
+    tokens. Both tokens are lowercased on return so that comparison
+    against filename tokens is case-insensitive.
+
+    Args:
+        raw: One ``--accept-pair`` argument as typed on the command line.
+
+    Returns:
+        Tuple of ``(word_a, word_b)`` pairs. Empty chunks are silently
+        skipped; the user can pass trailing separators without error.
+
+    Raises:
+        argparse.ArgumentTypeError: If a chunk does not contain exactly
+            one ``:`` between two non-empty tokens.
+    """
+    normalised: str = raw.replace(")(", "/").replace("(", "").replace(")", "")
+    pairs: list[AcceptedWordPair] = []
+    for chunk in normalised.split("/"):
+        piece: str = chunk.strip()
+        if not piece:
+            continue
+        if piece.count(":") != 1:
+            raise argparse.ArgumentTypeError(
+                f"Invalid --accept-pair chunk {piece!r}: expected 'word:word'."
+            )
+        word_a, word_b = piece.split(":")
+        left: str = word_a.strip().lower()
+        right: str = word_b.strip().lower()
+        if not left or not right:
+            raise argparse.ArgumentTypeError(
+                f"Invalid --accept-pair chunk {piece!r}: both sides must be non-empty."
+            )
+        pairs.append((left, right))
+    return tuple(pairs)
+
+
+def _normalize_accepted_pairs(pairs: Iterable[AcceptedWordPair]) -> AcceptedWordPairs:
+    """Return *pairs* as a tuple of lowercased, non-empty ``(a, b)`` tuples.
+
+    Programmatic callers of :class:`ProjectAuditor` may pass in pairs
+    built from arbitrary sources (config files, tests, direct literals);
+    this helper centralises the lowercasing and basic validation.
+
+    Args:
+        pairs: Iterable of two-string tuples.
+
+    Returns:
+        Tuple of lowercased ``(word_a, word_b)`` tuples.
+
+    Raises:
+        ValueError: If any pair does not contain exactly two non-empty
+            strings.
+    """
+    out: list[AcceptedWordPair] = []
+    for pair in pairs:
+        if len(pair) != 2:
+            raise ValueError(
+                f"Accepted-word pair must have exactly two elements, got {pair!r}."
+            )
+        word_a, word_b = pair
+        left: str = word_a.strip().lower()
+        right: str = word_b.strip().lower()
+        if not left or not right:
+            raise ValueError(f"Accepted-word pair has empty side: {pair!r}.")
+        out.append((left, right))
+    return tuple(out)
+
+
 def _has_totally_different_word(
     stem_a: str,
     stem_b: str,
     ratio_cutoff: float = _TOTALLY_DIFFERENT_WORD_RATIO,
+    accepted_pairs: AcceptedWordPairs = (),
 ) -> bool:
     """Return True if *stem_a* and *stem_b* differ by a full distinct word.
 
@@ -879,11 +1008,23 @@ def _has_totally_different_word(
     ratio below *ratio_cutoff* means the tokens are unrelated words, and
     the stems are reported as truly different.
 
+    If *accepted_pairs* is non-empty, each aligned token pair is first
+    checked against it (order-insensitive): when ``(token_a, token_b)``
+    or its reverse is declared as an accepted pair, the stems are
+    reported as truly different immediately, bypassing the ratio test.
+    This handles morphological antonyms such as ``checked`` /
+    ``unchecked`` where the similarity ratio is far too high to ever
+    cross the cutoff on its own.
+
     Args:
         stem_a: First filename stem.
         stem_b: Second filename stem.
         ratio_cutoff: Similarity threshold; tokens scoring strictly
             below this are considered totally different words.
+        accepted_pairs: Tuple of ``(word_a, word_b)`` pairs declared
+            as semantically distinct by the user (typically via
+            ``--accept-pair``). Comparison is case-insensitive; both
+            ``(a, b)`` and ``(b, a)`` match.
 
     Returns:
         ``True`` if at least one pair of aligned tokens is a fully
@@ -893,6 +1034,7 @@ def _has_totally_different_word(
     tokens_b: list[str] = re.findall(r"[A-Za-z0-9]+", stem_b.lower())
     if len(tokens_a) != len(tokens_b):
         return False
+    accepted_set: frozenset[AcceptedWordPair] = frozenset(accepted_pairs)
     for token_a, token_b in zip(tokens_a, tokens_b, strict=True):
         if token_a == token_b:
             continue
@@ -900,6 +1042,8 @@ def _has_totally_different_word(
         # numbered-variant normalizer; ignore them here too.
         if token_a.isdigit() and token_b.isdigit():
             continue
+        if (token_a, token_b) in accepted_set or (token_b, token_a) in accepted_set:
+            return True
         ratio: float = difflib.SequenceMatcher(None, token_a, token_b).ratio()
         if ratio < ratio_cutoff:
             return True
@@ -1478,6 +1622,28 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "paste directly. Off by default."
         ),
     )
+    parser.add_argument(
+        "-A",
+        "--accept-pair",
+        dest="accept_pair",
+        action="append",
+        type=_parse_accept_pair_spec,
+        default=None,
+        metavar="SPEC",
+        help=(
+            "Declare that two words are semantically distinct so that "
+            "filenames aligned on them are not flagged as near-duplicates. "
+            "Typical use: UI toggle sprites like "
+            "'checkbox_checked.png' and 'checkbox_unchecked.png' whose "
+            "edit distance is small but whose meaning is opposite. SPEC "
+            "accepts four equivalent syntaxes: 'checked:unchecked' (one "
+            "pair), 'checked:unchecked/up:down' (slash-separated list), "
+            "'(checked:unchecked)(up:down)' (paren-delimited), or "
+            "'(checked:unchecked)/(up:down)' (mixed). Comparison is "
+            "case-insensitive and order-insensitive. Repeatable: each "
+            "invocation appends to the accumulated list."
+        ),
+    )
 
     # ── Behaviour ──
     parser.add_argument(
@@ -1609,6 +1775,9 @@ def _run_audit(
     """
     extra_ignored: list[str] = list(args.ignore_dir or [])
     layout: Layout = Layout(args.layout)
+    accepted_pairs: list[AcceptedWordPair] = []
+    for spec in args.accept_pair or ():
+        accepted_pairs.extend(spec)
 
     try:
         auditor: ProjectAuditor = ProjectAuditor(
@@ -1617,6 +1786,7 @@ def _run_audit(
             similarity_threshold=args.threshold,
             extra_ignored_dirs=extra_ignored,
             allow_dashes=args.allow_dashes,
+            accepted_pairs=accepted_pairs,
         )
     except (FileNotFoundError, ValueError) as exc:
         out.error(str(exc))
@@ -1723,7 +1893,7 @@ def _dispatch_render(
             else:
                 output_path.write_text(payload, encoding="utf-8")
                 out.success(f"Wrote Markdown report to {output_path}")
-        case _:
+        case _:  # pragma: no cover - argparse restricts --format choices
             raise ValueError(f"Unknown format: {fmt}")
 
 

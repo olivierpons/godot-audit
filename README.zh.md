@@ -28,6 +28,8 @@
 - **CI 友好**:非零退出代码、`--no-color`、`--no-rich`、JSON 输出。
 - **多种输出格式**:文本(Rich 表格)、JSON、Markdown。
 - **布局感知建议**:每个警告都附带具体的移动建议。
+- **可调命名检查**：默认接受 `-` 作为分隔符（常见于资源包和字体系列），`--no-dashes` 强制使用严格的 snake_case；`--suggested-no-ext` 从 `Suggested` 列中去除扩展名，以匹配 Godot 的 F2 重命名流程。
+- **能识别反义词的近似重复过滤器**：通过 `--accept-pair` 声明像 `checked:unchecked` 或 `up:down` 这样的 UI 开关对，屏蔽相似度比率本身无法与拼写错误区分的误报。
 
 ## 安装
 
@@ -38,7 +40,7 @@
 pip install git+https://github.com/olivierpons/godot-audit.git
 
 # 固定到特定发布版本
-pip install git+https://github.com/olivierpons/godot-audit.git@v1.0.0
+pip install git+https://github.com/olivierpons/godot-audit.git@v1.2.0
 ```
 
 这将自动从其 GitHub 仓库拉取 `cli-toolkit[rich]`。
@@ -68,6 +70,15 @@ godot-audit . --format json --output audit.json
 
 # 用于 GitHub PR 评论的 Markdown 报告
 godot-audit . --format markdown > audit.md
+
+# 屏蔽 UI 开关的近似重复误报
+godot-audit . --accept-pair checked:unchecked
+
+# 在单个参数中传入多个接受对
+godot-audit . --accept-pair "(checked:unchecked)(up:down)(open:closed)"
+
+# 严格的 snake_case（拒绝连字符）并在 'Suggested' 中去除扩展名
+godot-audit . --no-dashes --suggested-no-ext
 ```
 
 ## 选项
@@ -84,6 +95,9 @@ godot-audit . --format markdown > audit.md
 | `-s` | `--severity` | 最低严重程度:`INFO`、`WARN`、`ERROR`(默认:`INFO`) |
 | `-t` | `--threshold` | 近似重复检测的相似度阈值(默认:`0.88`) |
 | `-i` | `--ignore-dir` | 添加到忽略列表的目录(可重复) |
+| `-k` | `--no-dashes` | 拒绝在词干中将 `-` 作为分隔符（默认：接受） |
+| `-x` | `--suggested-no-ext` | 从命名检查的 `Suggested` 列中去除文件扩展名 |
+| `-A` | `--accept-pair` | 声明两个词语义上不同（`checked:unchecked`）；可重复；接受 `/` 或 `()` 打包多对 |
 | `-p` | `--summary-position` | `top`、`bottom` 或 `none`(默认:`top`) |
 | `-S` | `--strict` | 即使 INFO 问题也非零退出 |
 | `-q` | `--quiet` | 隐藏摘要面板(`-p none` 的别名) |
