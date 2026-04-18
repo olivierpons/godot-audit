@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `near_duplicate` → `Near-identical to`
   - `orphan_companion` → `Missing source`
   - `backup` → (no third column)
+- Category table titles now carry the action verdict that used to be
+  repeated in every row's message: `backup` and `orphan_companion`
+  advertise "safe to delete"; `stale_name` advertises "promote or
+  delete"; `near_duplicate` advertises "confirm which one to keep".
 - The human-readable `message` is still populated on every `Issue` and
   preserved in the JSON output, so callers that rely on it keep
   working.

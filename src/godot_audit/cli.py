@@ -186,12 +186,17 @@ CATEGORY_DESCRIPTIONS: Final[dict[Category, str]] = {
         "Scene and its attached script are not organized per the active layout"
     ),
     Category.NAMING: "Filenames that are not snake_case",
-    Category.STALE_NAME: "Files ending with _old, _bak, _backup, etc.",
-    Category.NEAR_DUPLICATE: (
-        "Pairs of files with near-identical stems (numbered variants excluded)"
+    Category.STALE_NAME: (
+        "Files ending with _old, _bak, _backup, etc. — promote or delete"
     ),
-    Category.BACKUP: "Editor backups (.bak, .orig, ~)",
-    Category.ORPHAN_COMPANION: ".uid or .import with no matching source file",
+    Category.NEAR_DUPLICATE: (
+        "Pairs of files with near-identical stems (numbered variants excluded) "
+        "— confirm which one to keep"
+    ),
+    Category.BACKUP: "Editor backups (.bak, .orig, ~) — safe to delete",
+    Category.ORPHAN_COMPANION: (
+        ".uid or .import with no matching source file — safe to delete"
+    ),
 }
 
 # Stable order for category groups in rendered output
